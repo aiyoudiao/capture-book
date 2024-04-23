@@ -9,7 +9,9 @@ import {
   totalSize,
   getPageUrl,
   anchorSelector,
-  ratio,
+  pageSize,
+  getPageWidth,
+  getPageHeight,
 } from "./config.js";
 
 let spinner, pageUrl, currentPage, numPages, currentNumber, totalNumber;
@@ -18,15 +20,21 @@ export async function captureImagesAndGeneratePDF(bookUrl, outputFile) {
   const browser = await puppeteer.launch({
     headless: true, // 设置为true则为无头模式，设置为false则显示浏览器窗口
     args: [
-      // "--window-size=510,790", // 设置浏览器窗口大小
+      // `--window-size=${612 * ratio},${792 * ratio}`, // 设置浏览器窗口大小
       "--no-sandbox", // 禁用沙盒模式
       "--disable-setuid-sandbox", // 禁用设置用户标识沙盒
       // 可以根据需要传递其他参数
     ],
   });
+
+  const doc = new PDFDocument({ autoFirstPage: false, size: pageSize });
   const page = await browser.newPage();
-  await page.setViewport({ width: 510 * ratio, height: 790 * ratio });
-  const doc = new PDFDocument({ autoFirstPage: false });
+  await page.setViewport({
+    width: getPageWidth(),
+    height: getPageHeight(),
+  });
+  await page.setCacheEnabled(true);
+  await page.setDefaultNavigationTimeout(30000 * 5);
   const pdfStream = fs.createWriteStream(outputFile);
 
   doc.pipe(pdfStream);
@@ -44,7 +52,7 @@ export async function captureImagesAndGeneratePDF(bookUrl, outputFile) {
       await goToBookPage(page, bookUrl, currentPage);
       const imageUrls = await scrapeImageUrls(page);
       signale.info(
-        chalk.blue(`Page ${currentPage}: ${imageUrls.length} images found`)
+        chalk.blue(`Page ${currentPage}: ${imageUrls.length} images found\n`)
       );
       try {
         await captureImagesOnPage(page, imageUrls, doc);
@@ -52,12 +60,12 @@ export async function captureImagesAndGeneratePDF(bookUrl, outputFile) {
         signale.error(chalk.red("Error:"), error);
         signale.info(
           chalk.blue("Retry -> "),
-          `Page: ${currentPage}/${numPages}, bookUrl: ${bookUrl}`
+          `[captureImagesAndGeneratePDF] Page: ${currentPage}/${numPages}, bookUrl: ${bookUrl}\n`
         );
         await captureImagesOnPage(page, imageUrls, doc);
       }
-      currentPage++;
       signale.success(chalk.green(`Completed to page: ${pageUrl}`));
+      currentPage++;
     }
     spinner.succeed(chalk.green("PDF generated successfully"));
   } catch (error) {
@@ -87,8 +95,17 @@ async function getNumberOfPages(page) {
 async function goToBookPage(page, bookUrl, pageNumber) {
   pageUrl =
     getPageUrl?.(bookUrl, pageNumber) || `${bookUrl}?page=${pageNumber}`;
-  signale.pending(chalk.yellow(`Navigating to page: ${pageUrl}`));
-  await page.goto(pageUrl, { waitUntil: "networkidle2" });
+  signale.pending(`${chalk.yellow(`Navigating to page: ${pageUrl}`)} \n`);
+  try {
+    await page.goto(pageUrl, { waitUntil: "networkidle2" });
+  } catch (error) {
+    signale.error(chalk.red("Error:"), error);
+    signale.info(
+      chalk.blue("Retry -> "),
+      `[goToBookPage], pageUrl: ${pageUrl}\n`
+    );
+    await page.reload();
+  }
 }
 
 // 收集页面中的img
@@ -116,18 +133,19 @@ async function captureImagesOnPage(page, imageUrls, doc) {
   for (const imageUrl of imageUrls) {
     try {
       spinner.text = `Processing page ${currentPage}/${numPages}, Processing image ${currentNumber}/${totalNumber}, Capturing ${imageUrl} \n`;
+      const screenshotPath = `temp_screenshot_${currentPage}-${currentNumber}.jpg`;
       try {
         await page.goto(imageUrl, { waitUntil: "networkidle2" });
+        await page.screenshot({ path: screenshotPath });
       } catch (error) {
         signale.error(chalk.red(`Error capturing ${imageUrl}:`), error);
         signale.info(
           chalk.blue("Retry =>> "),
-          `Page: ${currentPage}/${numPages}, Image: ${currentNumber}/${totalNumber}, imageUrl: ${imageUrl}`
+          `[captureImagesOnPage] Page: ${currentPage}/${numPages}, Image: ${currentNumber}/${totalNumber}, imageUrl: ${imageUrl}\n`
         );
-        await page.goto(imageUrl, { waitUntil: "networkidle2" });
+        await page.reload();
+        await page.screenshot({ path: screenshotPath });
       }
-      const screenshotPath = `temp_screenshot_${currentPage}-${currentNumber}.jpg`;
-      await page.screenshot({ path: screenshotPath });
       doc.addPage();
       doc.image(screenshotPath, 0, 0, {
         fit: [doc.page.width, doc.page.height],
