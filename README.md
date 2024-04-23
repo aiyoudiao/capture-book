@@ -5,7 +5,7 @@ capture book 抓取书籍
 
 ![运行图](./assets/20240423-224206.gif)
 ![生成的书籍](./assets/20240423-225413.gif)
-[书籍demo](./cangyuantu-shenman-[1~2]-1713883264111.pdf)
+[书籍demo](./assets/cangyuantu-shenman-%5B1~2%5D-1713883264111.pdf)
 
 ## 说明
 
